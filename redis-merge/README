@@ -1,0 +1,151 @@
+# Redis比较与合并工具
+
+Redis比较与合并工具是一个功能强大的Python应用程序，用于比较两个Redis数据库并将它们的数据智能合并到一个新的Redis数据库中。该工具支持完善的日志记录、错误处理和批量处理功能，确保数据合并过程安全可靠。
+
+## 功能特性
+
+### 📊 比较功能
+- 批量扫描键以避免阻塞Redis
+- 比较两个Redis数据库中的键和值
+- 智能识别键的数据类型
+- 基于时间戳或默认偏好选择最新数据
+- 检测键类型不匹配问题
+
+### 📤 合并功能
+- 将两个Redis数据库合并到一个新的数据库
+- 支持自定义批量处理大小
+- 提供数据库选择偏好设置
+- 完善的错误处理和重试机制
+- 详细的合并结果统计
+
+### 🛠️ 工具特性
+- 支持命令行参数配置
+- 实时日志记录（文件和控制台）
+- 支持多Redis服务器合并
+- 自动清理目标数据库
+- 跨平台兼容性（Windows/Linux/Mac）
+
+## 快速开始
+
+### 安装依赖
+
+```bash
+pip install redis
+```
+
+### 基本使用
+
+#### 命令行工具
+
+使用`redis_merge.py`将两个Redis数据库合并到一个新数据库：
+
+```bash
+python redis_merge.py --host1 localhost --port 6379 --db1 0 --host2 localhost --port 6379 --db2 1 --host3 localhost --port 6379 --db3 10 --preference db2 --batch-size 100
+```
+
+#### 模块调用
+
+在Python代码中使用核心功能：
+
+```python
+from redis_compare import merge_to_new_db, connect_redis_with_retry
+
+# 配置Redis连接
+config1 = {'host': 'localhost', 'port': 6379, 'db': 0, 'decode_responses': False}
+config2 = {'host': 'localhost', 'port': 6379, 'db': 1, 'decode_responses': False}
+config3 = {'host': 'localhost', 'port': 6379, 'db': 10, 'decode_responses': False}
+
+# 执行合并
+merge_results = merge_to_new_db(config1, config2, config3, batch_size=100, default_preference='db2')
+print(f"合并完成，成功合并 {merge_results['successfully_merged']} 个键")
+```
+
+## 命令行参数
+
+| 参数 | 描述 | 默认值 |
+|------|------|--------|
+| `--host1` | 源数据库1的主机地址 | localhost |
+| `--host2` | 源数据库2的主机地址 | localhost |
+| `--host3` | 目标数据库的主机地址 | localhost |
+| `--port` | Redis服务器端口 | 6379 |
+| `--db1` | 源数据库1编号 | 0 |
+| `--db2` | 源数据库2编号 | 1 |
+| `--db3` | 目标数据库编号 | 10 |
+| `--preference` | 默认偏好数据库 | db2 |
+| `--batch-size` | 批量处理大小 | 100 |
+
+## 合并规则
+
+1. **不同键名**：保留两个数据库中的所有唯一键
+2. **相同键名**：
+   - **相同类型**：根据默认偏好或时间戳选择最新数据
+   - **不同类型**：记录类型不匹配错误
+3. **特殊数据类型处理**：
+   - **List**：合并两个列表的元素
+   - **Set**：合并两个集合的元素
+   - **Hash**：保留偏好数据库的所有字段
+   - **String**：保留偏好数据库的值
+   - **Sorted Set**：保留偏好数据库的元素
+
+## 测试功能
+
+使用提供的测试脚本验证合并功能：
+
+```bash
+python test_merge.py
+```
+
+测试脚本会：
+1. 在DB4和DB5中创建测试数据
+2. 将数据合并到DB6
+3. 验证合并结果是否符合预期
+
+## 项目结构
+
+```
+redis-compare/
+├── redis_compare.py      # 核心功能模块
+├── redis_merge.py        # 命令行合并工具
+├── test_merge.py  # 测试脚本
+├── README                # 项目说明文档
+└── README_PRODUCTION_TEST.md  # 生产环境测试文档
+```
+
+## 日志记录
+
+- 日志文件：`production_merge_test.log`
+- 日志级别：DEBUG（详细记录所有操作）
+- 日志内容：连接信息、合并进度、错误信息、合并结果等
+
+## 错误处理
+
+- Redis连接失败自动重试
+- 扫描和合并过程中的错误捕获
+- 合并失败键的详细记录
+- 完善的异常处理机制
+
+## 性能优化
+
+- 使用SCAN命令批量获取键，避免阻塞Redis
+- 支持自定义批量处理大小
+- 时间戳智能解析，提高数据选择准确性
+- 避免在主循环中执行耗时操作
+
+## 注意事项
+
+1. 合并前请确保目标数据库为空或可被覆盖
+2. 建议在低峰期执行大型数据库的合并操作
+3. 对于包含大量键的数据库，建议增大批量处理大小
+4. 确保Redis服务器具有足够的内存和处理能力
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交Issue和Pull Request！
+
+## 联系方式
+
+如有问题或建议，请通过GitHub Issue提交。
