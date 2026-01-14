@@ -18,6 +18,7 @@ import pymysql
 import pymongo
 from pymongo import MongoClient
 from pymongo.errors import BulkWriteError
+from pymongo import ReplaceOne
 
 
 class MigrationLogger:
@@ -127,6 +128,39 @@ class MySQLConnector:
                 return cursor.fetchall()
         except Exception as e:
             self.logger.error(f"获取表 {table_name} 数据失败: {str(e)}")
+            return []
+    
+    def fetch_data_by_ids(self, table_name: str, ids: List[str]) -> List[Dict]:
+        """
+        根据ID列表获取表数据
+        
+        Args:
+            table_name: 表名
+            ids: ID列表
+            
+        Returns:
+            数据列表
+        """
+        if not ids:
+            return []
+            
+        try:
+            with self.connection.cursor() as cursor:
+                # 构建IN查询，限制每个查询的ID数量以避免SQL过长
+                max_ids_per_query = 1000
+                all_results = []
+                
+                for i in range(0, len(ids), max_ids_per_query):
+                    batch_ids = ids[i:i + max_ids_per_query]
+                    id_list = ",".join([f"'{id_}'" for id_ in batch_ids])
+                    query = f"SELECT * FROM {table_name} WHERE id IN ({id_list})"
+                    cursor.execute(query)
+                    batch_results = cursor.fetchall()
+                    all_results.extend(batch_results)
+                
+                return all_results
+        except Exception as e:
+            self.logger.error(f"根据ID列表获取表 {table_name} 数据失败: {str(e)}")
             return []
 
 
@@ -380,52 +414,63 @@ class MongoDBConnector:
                 
                 collection = self.database[collection_name]
                 
-                # 过滤掉已存在的数据（跳过重复键错误）
-                existing_ids = set()
-                try:
-                    # 获取已存在的_id列表
-                    cursor = collection.find({}, {'_id': 1})
-                    existing_ids = {doc['_id'] for doc in cursor}
-                except Exception as e:
-                    self.logger.warning(f"获取已存在_id列表失败，将跳过重复数据检查: {str(e)}")
+                # 使用ReplaceOne + upsert=True替代insert_many
+                # 这样可以避免重复键错误，同时确保数据完整性
+                bulk_operations = []
+                for doc in data:
+                    # 确保每个文档都有_id字段
+                    if '_id' not in doc:
+                        self.logger.warning(f"文档缺少_id字段，跳过: {doc}")
+                        continue
+                    
+                    # 构建upsert操作
+                    filter_doc = {'_id': doc['_id']}
+                    bulk_operations.append(
+                        ReplaceOne(filter_doc, doc, upsert=True)
+                    )
                 
-                # 过滤掉已存在的数据
-                filtered_data = [doc for doc in data if doc.get('_id') not in existing_ids]
-                
-                if not filtered_data:
-                    self.logger.info(f"所有数据已存在，跳过插入 {len(data)} 条数据到集合 {collection_name}")
+                if not bulk_operations:
+                    self.logger.warning(f"没有有效的批量操作，跳过插入")
                     return True
                 
-                if len(filtered_data) < len(data):
-                    skipped_count = len(data) - len(filtered_data)
-                    self.logger.info(f"跳过 {skipped_count} 条重复数据，将插入 {len(filtered_data)} 条新数据")
+                # 执行批量操作
+                result = collection.bulk_write(bulk_operations, ordered=False)
                 
-                result = collection.insert_many(filtered_data, ordered=False)
-                self.logger.info(f"成功插入 {len(result.inserted_ids)} 条数据到集合 {collection_name}")
+                # 统计处理结果
+                inserted_count = result.upserted_count
+                modified_count = result.modified_count
+                matched_count = result.matched_count
+                
+                self.logger.info(f"成功处理 {len(bulk_operations)} 条数据到集合 {collection_name}")
+                self.logger.info(f"插入新记录: {inserted_count}, 更新现有记录: {modified_count}, 匹配记录: {matched_count}")
+                
                 return True
+                
             except BulkWriteError as e:
-                # 部分插入成功的情况
+                # 处理批量写入错误
                 failed_count = len(e.details['writeErrors'])
                 success_count = len(data) - failed_count
+                
                 if success_count > 0:
-                    self.logger.warning(f"批量插入部分失败，成功插入 {success_count} 条数据，失败 {failed_count} 条")
+                    self.logger.warning(f"批量操作部分失败，成功处理 {success_count} 条数据，失败 {failed_count} 条")
                     # 输出前几个错误详情
                     for i, error in enumerate(e.details['writeErrors'][:3]):
                         self.logger.warning(f"错误 {i+1}: {error.get('errmsg', str(error))}")
                     return True
                 else:
-                    self.logger.error(f"批量插入完全失败，所有 {len(data)} 条数据插入失败")
+                    self.logger.error(f"批量操作完全失败，所有 {len(data)} 条数据处理失败")
                     # 输出错误详情
                     for i, error in enumerate(e.details['writeErrors'][:5]):
                         self.logger.error(f"错误详情 {i+1}: {error.get('errmsg', str(error))}")
                     return False
+                    
             except Exception as e:
                 if attempt < max_retries:
                     wait_time = 2 ** attempt  # 指数退避
-                    self.logger.warning(f"插入数据失败，第 {attempt + 1} 次重试，等待 {wait_time} 秒: {str(e)}")
+                    self.logger.warning(f"数据处理失败，第 {attempt + 1} 次重试，等待 {wait_time} 秒: {str(e)}")
                     time.sleep(wait_time)
                 else:
-                    self.logger.error(f"插入数据到集合 {collection_name} 失败，已达最大重试次数: {str(e)}")
+                    self.logger.error(f"处理数据到集合 {collection_name} 失败，已达最大重试次数: {str(e)}")
                     return False
         return False
     
@@ -581,6 +626,39 @@ class DataTransformer:
             transformed_data.append(doc)
         
         return transformed_data
+
+    def transform_ug_id_card_config(self, mysql_data: List[Dict]) -> List[Dict]:
+        """
+        转换ug_id_card_config表数据
+        
+        Args:
+            mysql_data: MySQL原始数据
+            
+        Returns:
+            转换后的MongoDB文档
+        """
+        transformed_data = []
+        
+        for record in mysql_data:
+            # 转换数据类型和字段名
+            # 注意：ug_id_card_config表使用appID作为主键，而不是id字段
+            doc = {
+                '_id': str(record.get('appID')),  # 使用appID作为MongoDB主键
+                'appID': record.get('appID', 0),
+                'rnAppID': record.get('rnAppID', ''),
+                'rnSecretKey': record.get('rnSecretKey', ''),
+                'rnBizID': record.get('rnBizID', ''),
+                'rnState': record.get('rnState', 0),
+                'rnVerifyType': record.get('rnVerifyType', 0),
+                'migrationTime': datetime.now(),  # 添加迁移时间戳
+                'source': 'mysql'  # 标识数据来源
+            }
+            
+            # 清理空值
+            doc = {k: v for k, v in doc.items() if v is not None}
+            transformed_data.append(doc)
+        
+        return transformed_data
     
     def transform_data(self, table_name: str, mysql_data: List[Dict]) -> List[Dict]:
         """
@@ -595,7 +673,8 @@ class DataTransformer:
         """
         transform_methods = {
             'ug_order': self.transform_ug_order,
-            'ug_user': self.transform_ug_user
+            'ug_user': self.transform_ug_user,
+            'ug_id_card_config': self.transform_ug_id_card_config
         }
         
         if table_name in transform_methods:
@@ -823,9 +902,22 @@ class MigrationManager:
                 self.clear_progress(table_name)
                 return False
         
-        # 验证数据完整性
-        if not self.mongo_connector.verify_data_integrity(table_name, total_count):
-            self.logger.error(f"表 {table_name} 数据完整性验证失败")
+        # 验证数据完整性（增加重试机制）
+        verification_attempts = 3
+        verification_passed = False
+        
+        for attempt in range(verification_attempts):
+            if self.mongo_connector.verify_data_integrity(table_name, total_count):
+                verification_passed = True
+                break
+            elif attempt < verification_attempts - 1:
+                wait_time = 5 * (attempt + 1)  # 递增等待时间：5秒、10秒
+                self.logger.warning(f"数据完整性验证失败，第{attempt+1}次重试，等待 {wait_time} 秒...")
+                time.sleep(wait_time)
+            else:
+                self.logger.error(f"表 {table_name} 数据完整性验证失败，已达最大重试次数")
+        
+        if not verification_passed:
             self.rollback_table(table_name, migrated_batches)
             # 清除进度
             self.clear_progress(table_name)
@@ -849,28 +941,28 @@ class MigrationManager:
         Returns:
             是否成功
         """
-        self.logger.info(f"开始回滚表 {table_name} 的迁移操作")
+        # self.logger.info(f"开始回滚表 {table_name} 的迁移操作")
         
-        try:
-            collection = self.mongo_connector.database[table_name]
-            deleted_count = 0
+        # try:
+        #     collection = self.mongo_connector.database[table_name]
+        #     deleted_count = 0
             
-            # 如果无法精确识别，则删除整个集合（安全起见）
-            if migrated_batches:
-                # 尝试通过批次信息删除特定数据
-                # 这里简化处理，实际应该根据具体业务逻辑实现
-                result = collection.delete_many({'source': 'mysql'})
-                deleted_count = result.deleted_count
-            else:
-                # 没有批次信息，删除整个集合
-                result = collection.delete_many({})
-                deleted_count = result.deleted_count
+        #     # 如果无法精确识别，则删除整个集合（安全起见）
+        #     if migrated_batches:
+        #         # 尝试通过批次信息删除特定数据
+        #         # 这里简化处理，实际应该根据具体业务逻辑实现
+        #         result = collection.delete_many({'source': 'mysql'})
+        #         deleted_count = result.deleted_count
+        #     else:
+        #         # 没有批次信息，删除整个集合
+        #         result = collection.delete_many({})
+        #         deleted_count = result.deleted_count
             
-            self.logger.info(f"已回滚表 {table_name}，删除 {deleted_count} 条记录")
-            return True
-        except Exception as e:
-            self.logger.error(f"回滚表 {table_name} 失败: {str(e)}")
-            return False
+        #     self.logger.info(f"已回滚表 {table_name}，删除 {deleted_count} 条记录")
+        #     return True
+        # except Exception as e:
+        #     self.logger.error(f"回滚表 {table_name} 失败: {str(e)}")
+        #     return False
     
     def migrate_all_tables(self) -> bool:
         """迁移所有配置的表"""
