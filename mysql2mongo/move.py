@@ -424,7 +424,51 @@ class MongoDBConnector:
                         continue
                     
                     # 构建upsert操作
-                    filter_doc = {'_id': doc['_id']}
+                    # 对于分片集合，upsert操作需要包含分片键信息以便MongoDB能够提取精确的分片键
+                    # 使用复合过滤条件：既包含_id（确保唯一性）也包含分片键（满足分片要求）
+                    
+                    # 根据集合类型构建不同的过滤条件
+                    if collection_name == 'ug_id_card':
+                        if 'idCard' not in doc:
+                            self.logger.warning(f"文档缺少idCard分片键字段，跳过: {doc['_id']}")
+                            continue
+                        # 复合过滤条件：_id + 分片键
+                        filter_doc = {'_id': doc['_id'], 'idCard': doc['idCard']}
+                    elif collection_name == 'ug_user':
+                        if 'name' not in doc:
+                            self.logger.warning(f"文档缺少name分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'name': doc['name']}
+                    elif collection_name == 'ug_device':
+                        if 'appID' not in doc or 'deviceID' not in doc:
+                            missing_fields = []
+                            if 'appID' not in doc:
+                                missing_fields.append('appID')
+                            if 'deviceID' not in doc:
+                                missing_fields.append('deviceID')
+                            self.logger.warning(f"文档缺少分片键字段 {missing_fields}，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'appID': doc['appID'], 'deviceID': doc['deviceID']}
+                    elif collection_name == 'ug_order':
+                        # 根据setup_table_shard.js，ug_order的分片键是uid，不是appID
+                        if 'uid' not in doc:
+                            self.logger.warning(f"文档缺少uid分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'uid': doc['uid']}
+                    elif collection_name == 'ug_order_notify_log':
+                        if 'orderID' not in doc:
+                            self.logger.warning(f"文档缺少orderID分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'orderID': doc['orderID']}
+                    elif collection_name == 'ug_order_platform_log':
+                        if 'orderID' not in doc:
+                            self.logger.warning(f"文档缺少orderID分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'orderID': doc['orderID']}  
+                    else:
+                        # 非分片集合或未知分片键的集合，只使用_id
+                        filter_doc = {'_id': doc['_id']}
+                        
                     bulk_operations.append(
                         ReplaceOne(filter_doc, doc, upsert=True)
                     )
@@ -539,7 +583,8 @@ class DataTransformer:
             # 转换数据类型和字段名
             doc = {
                 '_id': str(record.get('id')),  # MongoDB使用_id作为主键
-                'uid': str(record.get('uid')),
+                'id': record.get('id', 0),
+                'uid': record.get('uid', 0),
                 'appID': record.get('appID', 0),
                 'channelID': record.get('channelID', 0),
                 'payType': record.get('payType', 0),
@@ -585,7 +630,7 @@ class DataTransformer:
             transformed_data.append(doc)
         
         return transformed_data
-    
+
     def transform_ug_user(self, mysql_data: List[Dict]) -> List[Dict]:
         """
         转换ug_user表数据
@@ -602,6 +647,7 @@ class DataTransformer:
             # 转换数据类型和字段名
             doc = {
                 '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                'id': record.get('id', 0),
                 'name': record.get('name', ''),
                 'phoneNum': record.get('phoneNum', ''),
                 'loginName': record.get('loginName', ''),
@@ -621,11 +667,46 @@ class DataTransformer:
                 'source': 'mysql_ug_user'  # 标识数据来源
             }
             
+            # 关键：确保分片键字段存在且非空
+            # 如果appID为空，设置默认值避免分片键提取失败
+            if doc.get('appID') is None or doc.get('appID') == '':
+                doc['appID'] = 0  # 设置默认appID
+                self.logger.warning(f"文档 {doc['_id']} 的appID为空，已设置为默认值0")
+            
+            # 清理其他空值（但保留分片键字段）
+            doc = {k: v for k, v in doc.items() if v is not None or k in ['appID']}
+            transformed_data.append(doc)
+        
+        return transformed_data
+
+    def transform_ug_runtime_temp(self, mysql_data: List[Dict]) -> List[Dict]:
+        """
+        转换ug_runtime_temp表数据
+        
+        Args:
+            mysql_data: MySQL原始数据
+            
+        Returns:
+            转换后的MongoDB文档
+        """
+        transformed_data = []
+        
+        for record in mysql_data:
+            # 转换数据类型和字段名
+            doc = {
+                '_id': str(record.get('recordKey', '')),  # MongoDB使用_id作为主键，使用recordKey字段的值
+                'recordKey': record.get('recordKey', ''),
+                'recordVal': record.get('recordVal'),
+                'migrationTime': datetime.now(),  # 添加迁移时间戳
+                'source': 'mysql_ug_runtime_temp'  # 标识数据来源
+            }
+            
             # 清理空值
             doc = {k: v for k, v in doc.items() if v is not None}
             transformed_data.append(doc)
         
         return transformed_data
+
 
     def transform_ug_id_card_config(self, mysql_data: List[Dict]) -> List[Dict]:
         """
@@ -659,7 +740,123 @@ class DataTransformer:
             transformed_data.append(doc)
         
         return transformed_data
-    
+
+    def transform_ug_device(self, mysql_data: List[Dict]) -> List[Dict]:
+        """
+        转换ug_device表数据
+        
+        Args:
+            mysql_data: MySQL原始数据
+            
+        Returns:
+            转换后的MongoDB文档
+        """
+        transformed_data = []
+        
+        # 调试：显示第一条记录的字段名
+        if mysql_data and len(mysql_data) > 0:
+            first_record = mysql_data[0]
+            self.logger.info(f"MySQL表字段名: {list(first_record.keys())}")
+            self.logger.info(f"第一条记录示例: {first_record}")
+        
+        for i, record in enumerate(mysql_data):
+            # 调试：显示原始记录
+            if i == 0:
+                self.logger.info(f"原始记录字段: {list(record.keys())}")
+                self.logger.info(f"appID值: {record.get('appID')}, 类型: {type(record.get('appID'))}")
+                self.logger.info(f"deviceID值: {record.get('deviceID')}, 类型: {type(record.get('deviceID'))}")
+            
+            # 转换数据类型和字段名
+            doc = {
+                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                'id': record.get('id', 0),
+                'appID': int(record.get('appID', 0)),  # 分片键字段，确保为整数类型
+                'deviceID': str(record.get('deviceID', '')),  # 分片键字段，确保为字符串类型
+                'uid': record.get('uid', 0),
+                'oaid': record.get('oaid'),
+                'imei': record.get('imei'),
+                'idfa': record.get('idfa'),
+                'createTime': record.get('createTime'),
+                'updateTime': record.get('updateTime'),
+                'migrationTime': datetime.now(),  # 添加迁移时间戳
+                'source': 'mysql_ug_device'  # 标识数据来源
+            }
+            
+            # 调试：显示转换后的文档
+            if i == 0:
+                self.logger.info(f"转换后文档字段: {list(doc.keys())}")
+                self.logger.info(f"转换后appID值: {doc['appID']}, 类型: {type(doc['appID'])}")
+                self.logger.info(f"转换后deviceID值: {doc['deviceID']}, 类型: {type(doc['deviceID'])}")
+            
+            # 关键：确保分片键字段存在且非空
+            # 如果appID或deviceID为空，设置默认值避免分片键提取失败
+            if doc['appID'] is None or doc['appID'] == '':
+                doc['appID'] = 0  # 设置默认appID
+                self.logger.warning(f"文档 {doc['_id']} 的appID为空，已设置为默认值0")
+            
+            if doc['deviceID'] is None or doc['deviceID'] == '':
+                doc['deviceID'] = 'unknown_device'  # 设置默认deviceID
+                self.logger.warning(f"文档 {doc['_id']} 的deviceID为空，已设置为默认值'unknown_device'")
+            
+            # 清理其他空值（但保留分片键字段）
+            doc = {k: v for k, v in doc.items() if v is not None or k in ['appID', 'deviceID']}
+            
+            # 调试：显示最终文档
+            if i == 0:
+                self.logger.info(f"最终文档字段: {list(doc.keys())}")
+                self.logger.info(f"最终appID值: {doc['appID']}, 类型: {type(doc['appID'])}")
+                self.logger.info(f"最终deviceID值: {doc['deviceID']}, 类型: {type(doc['deviceID'])}")
+                self.logger.info(f"最终文档示例: {doc}")
+            
+            transformed_data.append(doc)
+        
+        return transformed_data
+
+    def transform_ug_id_card(self, mysql_data: List[Dict]) -> List[Dict]:
+        """
+        转换ug_id_card表数据
+        
+        Args:
+            mysql_data: MySQL原始数据
+            
+        Returns:
+            转换后的MongoDB文档
+        """
+        transformed_data = []
+        
+        # 调试：显示第一条记录的字段名
+        if mysql_data and len(mysql_data) > 0:
+            first_record = mysql_data[0]
+            self.logger.info(f"ug_id_card表字段名: {list(first_record.keys())}")
+        
+        for i, record in enumerate(mysql_data):
+            # 转换数据类型和字段名
+            doc = {
+                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                'id': record.get('id', 0),
+                'realName': record.get('realName', ''),
+                'idCard': str(record.get('idCard', '')),  # 分片键字段，确保为字符串类型
+                'state': record.get('state', 0),  # 注意：MySQL中是state，不是status
+                'pi': record.get('pi', ''),
+                'birthday': record.get('birthday'),
+                'createTime': record.get('createTime'),
+                'migrationTime': datetime.now(),  # 添加迁移时间戳
+                'source': 'mysql_ug_id_card'  # 标识数据来源
+            }
+            
+            # 关键：确保分片键字段存在且非空
+            # 如果idCard为空，设置默认值避免分片键提取失败
+            if doc['idCard'] is None or doc['idCard'] == '':
+                doc['idCard'] = f'default_id_card_{doc["id"]}'  # 设置默认idCard
+                self.logger.warning(f"文档 {doc['_id']} 的idCard为空，已设置为默认值")
+            
+            # 清理其他空值（但保留分片键字段）
+            doc = {k: v for k, v in doc.items() if v is not None or k in ['idCard']}
+            
+            transformed_data.append(doc)
+        
+        return transformed_data
+
     def transform_data(self, table_name: str, mysql_data: List[Dict]) -> List[Dict]:
         """
         根据表名选择对应的转换方法
@@ -674,10 +871,15 @@ class DataTransformer:
         transform_methods = {
             'ug_order': self.transform_ug_order,
             'ug_user': self.transform_ug_user,
-            'ug_id_card_config': self.transform_ug_id_card_config
+            'ug_runtime_temp': self.transform_ug_runtime_temp,
+            'ug_id_card_config': self.transform_ug_id_card_config,
+            'ug_device': self.transform_ug_device,
+            'ug_device1': self.transform_ug_device,  # 同时支持ug_device1表
+            'ug_id_card': self.transform_ug_id_card  # 添加ug_id_card表转换方法
         }
         
         if table_name in transform_methods:
+            self.logger.info(f"使用专用转换方法处理表: {table_name}")
             return transform_methods[table_name](mysql_data)
         else:
             # 默认转换方法
@@ -699,9 +901,10 @@ class DataTransformer:
         for record in mysql_data:
             doc = {}
             for key, value in record.items():
-                # 转换主键
+                # 转换主键：同时保留id字段和创建_id字段
                 if key == 'id':
                     doc['_id'] = str(value)
+                    doc['id'] = value  # 同时保留原始id字段
                 else:
                     # 处理Python date类型，转换为datetime
                     if isinstance(value, date) and not isinstance(value, datetime):
