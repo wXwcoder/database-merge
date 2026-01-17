@@ -465,6 +465,18 @@ class MongoDBConnector:
                             self.logger.warning(f"文档缺少orderID分片键字段，跳过: {doc['_id']}")
                             continue
                         filter_doc = {'_id': doc['_id'], 'orderID': doc['orderID']}  
+                    elif collection_name == 'ug_game_user':
+                        # 根据setup_table_shard.js，ug_game_user的分片键是uid
+                        if 'uid' not in doc:
+                            self.logger.warning(f"文档缺少uid分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'uid': doc['uid']}
+                    elif collection_name == 'ug_login_log':
+                        # 根据setup_table_shard.js，ug_login_log的分片键是userID
+                        if 'userID' not in doc:
+                            self.logger.warning(f"文档缺少userID分片键字段，跳过: {doc['_id']}")
+                            continue
+                        filter_doc = {'_id': doc['_id'], 'userID': doc['userID']}
                     else:
                         # 非分片集合或未知分片键的集合，只使用_id
                         filter_doc = {'_id': doc['_id']}
