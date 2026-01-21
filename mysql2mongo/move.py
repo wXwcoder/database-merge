@@ -595,7 +595,7 @@ class DataTransformer:
             # 转换数据类型和字段名
             doc = {
                 '_id': str(record.get('id')),  # MongoDB使用_id作为主键
-                'id': record.get('id', 0),
+                #'id': record.get('id', 0),
                 'uid': record.get('uid', 0),
                 'appID': record.get('appID', 0),
                 'channelID': record.get('channelID', 0),
@@ -659,7 +659,7 @@ class DataTransformer:
             # 转换数据类型和字段名
             doc = {
                 '_id': str(record.get('id')),  # MongoDB使用_id作为主键
-                'id': record.get('id', 0),
+                #'id': record.get('id', 0),
                 'name': record.get('name', ''),
                 'phoneNum': record.get('phoneNum', ''),
                 'loginName': record.get('loginName', ''),
@@ -781,7 +781,7 @@ class DataTransformer:
             # 转换数据类型和字段名
             doc = {
                 '_id': str(record.get('id')),  # MongoDB使用_id作为主键
-                'id': record.get('id', 0),
+                #'id': record.get('id', 0),
                 'appID': int(record.get('appID', 0)),  # 分片键字段，确保为整数类型
                 'deviceID': str(record.get('deviceID', '')),  # 分片键字段，确保为字符串类型
                 'uid': record.get('uid', 0),
@@ -844,8 +844,8 @@ class DataTransformer:
         for i, record in enumerate(mysql_data):
             # 转换数据类型和字段名
             doc = {
-                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
-                'id': record.get('id', 0),
+                '_id': record.get('idCard', ''),  # MongoDB使用_id作为主键
+                #'id': record.get('id', 0),
                 'realName': record.get('realName', ''),
                 'idCard': str(record.get('idCard', '')),  # 分片键字段，确保为字符串类型
                 'state': record.get('state', 0),  # 注意：MySQL中是state，不是status
@@ -916,7 +916,7 @@ class DataTransformer:
                 # 转换主键：同时保留id字段和创建_id字段
                 if key == 'id':
                     doc['_id'] = str(value)
-                    doc['id'] = value  # 同时保留原始id字段
+                    #doc['id'] = value  # 同时保留原始id字段
                 else:
                     # 处理Python date类型，转换为datetime
                     if isinstance(value, date) and not isinstance(value, datetime):
