@@ -594,7 +594,7 @@ class DataTransformer:
         for record in mysql_data:
             # 转换数据类型和字段名
             doc = {
-                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                '_id': int(record.get('id', 0)),  # MongoDB使用_id作为主键
                 #'id': record.get('id', 0),
                 'uid': record.get('uid', 0),
                 'appID': record.get('appID', 0),
@@ -658,7 +658,7 @@ class DataTransformer:
         for record in mysql_data:
             # 转换数据类型和字段名
             doc = {
-                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                '_id': int(record.get('id', 0)),  # MongoDB使用_id作为主键
                 #'id': record.get('id', 0),
                 'name': record.get('name', ''),
                 'phoneNum': record.get('phoneNum', ''),
@@ -736,7 +736,7 @@ class DataTransformer:
             # 转换数据类型和字段名
             # 注意：ug_id_card_config表使用appID作为主键，而不是id字段
             doc = {
-                '_id': str(record.get('appID')),  # 使用appID作为MongoDB主键
+                '_id': int(record.get('appID', 0)),  # 使用appID作为MongoDB主键
                 'appID': record.get('appID', 0),
                 'rnAppID': record.get('rnAppID', ''),
                 'rnSecretKey': record.get('rnSecretKey', ''),
@@ -780,7 +780,7 @@ class DataTransformer:
             
             # 转换数据类型和字段名
             doc = {
-                '_id': str(record.get('id')),  # MongoDB使用_id作为主键
+                '_id': int(record.get('id', 0)),  # MongoDB使用_id作为主键
                 #'id': record.get('id', 0),
                 'appID': int(record.get('appID', 0)),  # 分片键字段，确保为整数类型
                 'deviceID': str(record.get('deviceID', '')),  # 分片键字段，确保为字符串类型
@@ -915,7 +915,7 @@ class DataTransformer:
             for key, value in record.items():
                 # 转换主键：同时保留id字段和创建_id字段
                 if key == 'id':
-                    doc['_id'] = str(value)
+                    doc['_id'] = int(value)
                     #doc['id'] = value  # 同时保留原始id字段
                 else:
                     # 处理Python date类型，转换为datetime
