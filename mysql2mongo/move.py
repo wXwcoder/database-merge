@@ -497,8 +497,8 @@ class MongoDBConnector:
                 modified_count = result.modified_count
                 matched_count = result.matched_count
                 
-                self.logger.info(f"成功处理 {len(bulk_operations)} 条数据到集合 {collection_name}")
-                self.logger.info(f"插入新记录: {inserted_count}, 更新现有记录: {modified_count}, 匹配记录: {matched_count}")
+                #self.logger.info(f"成功处理 {len(bulk_operations)} 条数据到集合 {collection_name}")
+                #self.logger.info(f"插入新记录: {inserted_count}, 更新现有记录: {modified_count}, 匹配记录: {matched_count}")
                 
                 return True
                 
@@ -839,7 +839,7 @@ class DataTransformer:
         # 调试：显示第一条记录的字段名
         if mysql_data and len(mysql_data) > 0:
             first_record = mysql_data[0]
-            self.logger.info(f"ug_id_card表字段名: {list(first_record.keys())}")
+            #self.logger.info(f"ug_id_card表字段名: {list(first_record.keys())}")
         
         for i, record in enumerate(mysql_data):
             # 转换数据类型和字段名
@@ -881,21 +881,21 @@ class DataTransformer:
             转换后的MongoDB文档
         """
         transform_methods = {
-            'ug_order': self.transform_ug_order,
-            'ug_user': self.transform_ug_user,
-            'ug_runtime_temp': self.transform_ug_runtime_temp,
-            'ug_id_card_config': self.transform_ug_id_card_config,
-            'ug_device': self.transform_ug_device,
-            'ug_device1': self.transform_ug_device,  # 同时支持ug_device1表
+            # 'ug_order': self.transform_ug_order,
+            # 'ug_user': self.transform_ug_user,
+            # 'ug_runtime_temp': self.transform_ug_runtime_temp,
+            # 'ug_id_card_config': self.transform_ug_id_card_config,
+            # 'ug_device': self.transform_ug_device,
+            # 'ug_device1': self.transform_ug_device,  # 同时支持ug_device1表
             'ug_id_card': self.transform_ug_id_card  # 添加ug_id_card表转换方法
         }
         
         if table_name in transform_methods:
-            self.logger.info(f"使用专用转换方法处理表: {table_name}")
+            #self.logger.info(f"使用专用转换方法处理表: {table_name}")
             return transform_methods[table_name](mysql_data)
         else:
             # 默认转换方法
-            self.logger.warning(f"未找到表 {table_name} 的专用转换方法，使用默认转换")
+            #self.logger.warning(f"未找到表 {table_name} 的专用转换方法，使用默认转换")
             return self.default_transform(mysql_data)
     
     def default_transform(self, mysql_data: List[Dict]) -> List[Dict]:
